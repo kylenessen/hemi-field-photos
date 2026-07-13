@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hemispherical Photo Tool</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2387b7dd'/%3E%3Ccircle cx='50' cy='50' r='45' fill='none' stroke='%23233' stroke-width='6'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<header>
+  <h1>Hemispherical Photo Tool</h1>
+  <p class="sub">360&deg; equirectangular photo &rarr; compass-aligned hemisphere &rarr; sky
+  threshold &rarr; sun path. Everything runs in your browser; photos never leave
+  this device.</p>
+</header>
+
+<main>
+
+  <!-- 1 · Upload ---------------------------------------------------------->
+  <section class="card" id="step-upload">
+    <h2><span class="stepnum">1</span> Upload a 360&deg; photo</h2>
+    <div id="dropzone" tabindex="0">
+      <p><strong>Tap to choose</strong> or drag &amp; drop an equirectangular
+      360&deg; photo (2:1, e.g. 15520&times;7760)</p>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+    <div id="uploadInfo" class="info" hidden></div>
+    <canvas id="previewCanvas" class="preview" hidden></canvas>
+  </section>
+
+  <!-- 2 · Set north ------------------------------------------------------->
+  <section class="card locked" id="step-north">
+    <h2><span class="stepnum">2</span> Set north</h2>
+    <p class="hint">This is the ground, seen from above &mdash; you're at the
+    center. <strong>Tap two points</strong> (base of the north reference, then
+    its tip, e.g. arm &rarr; phone) or <strong>drag the ring handle</strong> to
+    point the arrow north.</p>
+    <div class="canvaswrap">
+      <canvas id="groundCanvas"></canvas>
+    </div>
+    <div class="row">
+      <button id="northUndo" disabled>&#8630; Undo</button>
+      <button id="northRedo" disabled>&#8631; Redo</button>
+      <button id="northReset" disabled>Reset</button>
+      <span id="northReadout" class="readout">north not set</span>
+    </div>
+  </section>
+
+  <!-- 3 · Hemisphere + threshold ------------------------------------------>
+  <section class="card locked" id="step-hemi">
+    <h2><span class="stepnum">3</span> Hemisphere &amp; sky threshold</h2>
+    <div class="canvaswrap">
+      <canvas id="hemiCanvas"></canvas>
+      <div id="hemiStatus" class="status" hidden>Rendering&hellip;</div>
+    </div>
+    <div class="row seg" role="group" aria-label="View">
+      <button id="viewColor" class="segbtn active">True color</button>
+      <button id="viewMask" class="segbtn">Sky mask</button>
+      <label class="chk"><input type="checkbox" id="gridToggle" checked> Grid + N/E/S/W</label>
+      <label class="chk"><input type="checkbox" id="sunToggle" checked> Sun path</label>
+    </div>
+    <div class="row slider-row">
+      <label for="threshSlider">Sky threshold</label>
+      <input type="range" id="threshSlider" min="0" max="255" value="128" disabled>
+      <span id="threshValue" class="readout">&mdash;</span>
+      <button id="threshAuto" disabled>Auto (Otsu)</button>
+    </div>
+    <div id="opennessSummary" class="info" hidden></div>
+    <details id="ringDetails" hidden>
+      <summary>Openness by 10&deg; zenith ring</summary>
+      <div id="ringBars"></div>
+    </details>
+  </section>
+
+  <!-- 4 · Sun path -------------------------------------------------------->
+  <section class="card locked" id="step-sun">
+    <h2><span class="stepnum">4</span> Sun path</h2>
+    <div class="row wrap">
+      <label>Lat <input type="number" id="latInput" step="0.0001" min="-90" max="90" placeholder="35.3102"></label>
+      <label>Lon <input type="number" id="lonInput" step="0.0001" min="-180" max="180" placeholder="-120.8326"></label>
+      <button id="geoBtn">&#9678; Use my location</button>
+    </div>
+    <div class="row wrap seg" role="group" aria-label="Date">
+      <button class="segbtn datebtn active" data-preset="today">Today</button>
+      <button class="segbtn datebtn" data-preset="mar15">Mar 15</button>
+      <button class="segbtn datebtn" data-preset="dec1">Dec 1</button>
+      <label class="datecustom">Custom <input type="date" id="dateInput"></label>
+    </div>
+    <div class="row wrap">
+      <label>Time zone
+        <select id="tzMode">
+          <option value="auto" selected>This device's (auto, incl. DST)</option>
+          <option value="manual">Manual UTC offset</option>
+        </select>
+      </label>
+      <label id="tzOffsetLabel" hidden>UTC offset (h) <input type="number" id="tzOffset" step="0.5" min="-12" max="14" value="-8"></label>
+    </div>
+    <div id="sunSummary" class="info" hidden></div>
+    <p class="legend"><span class="dot open"></span> open sky
+       <span class="dot blocked"></span> blocked</p>
+  </section>
+
+  <!-- 5 · Export ---------------------------------------------------------->
+  <section class="card locked" id="step-export">
+    <h2><span class="stepnum">5</span> Export</h2>
+    <p class="hint">PNGs render at high resolution from the original photo
+    (up to 8192&times;4096 source, 2048&times;2048 output).</p>
+    <div class="row wrap">
+      <button id="expHemi" disabled>Hemisphere PNG</button>
+      <button id="expMask" disabled>Sky-mask PNG</button>
+      <button id="expAnnotated" disabled>Annotated PNG</button>
+      <button id="expJson" disabled>Metrics JSON</button>
+    </div>
+    <div id="exportStatus" class="info" hidden></div>
+  </section>
+
+</main>
+
+<footer>
+  <p>Client-side only &mdash; math matches
+  <code>reference/hemi_pipeline.py</code>. Sun positions via
+  <a href="https://github.com/mourner/suncalc">SunCalc</a> (MIT).</p>
+</footer>
+
+<script src="js/vendor/suncalc.js"></script>
+<script src="js/projection.js"></script>
+<script src="js/threshold.js"></script>
+<script src="js/sunpath.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
