@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.python-version
+
+# Reference demo output
+reference/out/
+hemi_out/
+
+# Node / web build (when the app is added)
+node_modules/
+dist/
+.vite/
+
+# OS
+.DS_Store
+Thumbs.db
