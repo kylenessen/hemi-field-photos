@@ -9,6 +9,9 @@ venv/
 reference/out/
 hemi_out/
 
+# Validation ground truth (regenerate with validation/gen_reference.py)
+validation/_truth/
+
 # Node / web build (when the app is added)
 node_modules/
 dist/
