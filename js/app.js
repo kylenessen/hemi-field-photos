@@ -25,17 +25,19 @@
     equirect: null,           // working ImageData (<= WORK_MAX_W wide, 2:1)
     topHalf: null, bottomHalf: null,
     groundBase: null,         // brightened ground-view canvas (image only)
+    groundZoom: 2.5,          // center magnification of the ground view
     northAz: null,            // azimuth deg (-180..180) of north, or null
     northHistory: [], northFuture: [],
-    tapPoint: null,           // first of the two set-north taps (canvas px)
     dragging: false,
     hemi: null,               // hemisphere ImageData (HEMI_SIZE)
     hemiCanvasCache: null,    // offscreen canvas of true-color hemisphere
     maskCanvasCache: null,
     blurred: null, otsu: null, threshold: null, userThreshold: false,
-    mask: null, metrics: null,
+    mask: null, metrics: null, factors: null,
     view: 'color',
-    sun: null,                // {steps, open, blocked} or null
+    sun: null,                // time-step classification {steps, open, blocked}
+    sunRaster: null,          // per-pixel path classification {pixels, open, total}
+    energy: null,             // clear-sky day integration
     datePreset: 'today', customDate: null,
     exportCache: null         // {key, equirect, hemi, blurred} for exports
   };
@@ -173,7 +175,8 @@
 
     // reset downstream state
     st.northAz = null; st.northHistory = []; st.northFuture = [];
-    st.tapPoint = null; st.hemi = null; st.sun = null; st.userThreshold = false;
+    st.hemi = null; st.sun = null; st.sunRaster = null; st.energy = null;
+    st.userThreshold = false;
     updateNorthButtons();
     $('northReadout').textContent = 'north not set';
 
@@ -185,10 +188,10 @@
   // ---- 2 · Set north ----------------------------------------------------------
   var groundCanvas = $('groundCanvas');
 
-  // Render the looking-down ground view once per photo, auto-brightened for
-  // visibility (the ground half of these photos is usually dark).
+  // Render the looking-down ground view (re-run on zoom change),
+  // auto-brightened for visibility (the ground half is usually dark).
   function renderGroundBase() {
-    var g = P.equirectToGroundView(st.bottomHalf, GROUND_SIZE, 0);
+    var g = P.equirectToGroundView(st.bottomHalf, GROUND_SIZE, 0, st.groundZoom);
     // stretch levels to the 99th percentile of the max channel
     var hist = new Uint32Array(256), d = g.data, i, n = 0;
     for (i = 0; i < d.length; i += 4) {
@@ -226,15 +229,6 @@
     ctx.setLineDash([6, 8]);
     ctx.stroke();
     ctx.setLineDash([]);
-
-    // first tap marker
-    if (st.tapPoint) {
-      ctx.beginPath();
-      ctx.arc(st.tapPoint.x, st.tapPoint.y, 9, 0, 2 * Math.PI);
-      ctx.fillStyle = 'rgba(106,176,232,0.9)';
-      ctx.fill();
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
-    }
 
     if (st.northAz == null) return;
 
@@ -314,29 +308,22 @@
     var cx = GROUND_SIZE / 2, R = GROUND_SIZE / 2;
     var dx = p.x - cx, dy = p.y - cx;
     var r = Math.hypot(dx, dy);
+    if (r > R) return;
 
     // near the ring (or on the handle) -> drag mode
     if (r > R * 0.82) {
       st.dragging = true;
-      st.tapPoint = null;
       groundCanvas.setPointerCapture(e.pointerId);
       setNorth(P.groundThetaToAzimuth(Math.atan2(dy, dx), 0), true);
       return;
     }
-    if (r > R) return;
+    if (r < 25) return;                            // too close to center: direction ambiguous
 
-    // tap-two-points mode
-    if (!st.tapPoint) {
-      st.tapPoint = p;
-      drawGround();
-    } else {
-      var vx = p.x - st.tapPoint.x, vy = p.y - st.tapPoint.y;
-      if (Math.hypot(vx, vy) < 8) return;          // ignore double-tap in place
-      setNorth(P.groundThetaToAzimuth(Math.atan2(vy, vx), 0), true);
-      st.tapPoint = null;
-      drawGround();
-      scheduleHemiRender();
-    }
+    // single tap: north is the direction from the center through the tap
+    // (the azimuth of a point in this polar view depends only on its angle
+    // around the center, so one tap fully determines it)
+    setNorth(P.groundThetaToAzimuth(Math.atan2(dy, dx), 0), true);
+    scheduleHemiRender();
   });
 
   groundCanvas.addEventListener('pointermove', function (e) {
@@ -370,10 +357,25 @@
   });
   $('northReset').addEventListener('click', function () {
     st.northHistory = []; st.northFuture = [];
-    st.northAz = null; st.tapPoint = null;
+    st.northAz = null;
     $('northReadout').textContent = 'north not set';
     updateNorthButtons();
     drawGround();
+  });
+
+  // zoom slider: re-render the ground view, throttled to one per frame
+  var zoomQueued = false;
+  $('groundZoom').addEventListener('input', function () {
+    st.groundZoom = +this.value;
+    $('groundZoomValue').textContent = st.groundZoom.toFixed(2).replace(/\.?0+$/, '') + '×';
+    if (zoomQueued) return;
+    zoomQueued = true;
+    requestAnimationFrame(function () {
+      zoomQueued = false;
+      if (!st.bottomHalf) return;
+      renderGroundBase();
+      drawGround();
+    });
   });
 
   // ---- 3 · Hemisphere + threshold ----------------------------------------------
@@ -413,6 +415,7 @@
 
     $('hemiStatus').hidden = true;
     unlock('step-sun');
+    unlock('step-stats');
     unlock('step-export');
     ['expHemi', 'expMask', 'expAnnotated', 'expJson'].forEach(function (id) {
       $(id).disabled = false;
@@ -497,17 +500,22 @@
       });
     }
 
-    if (opts.sun && st.sun) {
-      var mr = Math.max(4, Math.round(size * 0.005));
-      st.sun.steps.forEach(function (s) {
-        var x = s.x * size / HEMI_SIZE, y = s.y * size / HEMI_SIZE;
+    if (opts.sun && st.sunRaster && st.sunRaster.total) {
+      // the rasterized track: every crossed pixel, drawn as a continuous
+      // line — black underlay first, then each pixel in its open/blocked color
+      var sc = size / HEMI_SIZE;
+      var mr = Math.max(2.5, size * 0.0035);
+      ctx.fillStyle = '#000';
+      st.sunRaster.pixels.forEach(function (p) {
         ctx.beginPath();
-        ctx.arc(x, y, mr, 0, 2 * Math.PI);
-        ctx.fillStyle = s.open ? '#ffd200' : '#eb2828';
+        ctx.arc(p.x * sc, p.y * sc, mr + Math.max(1, k), 0, 2 * Math.PI);
         ctx.fill();
-        ctx.lineWidth = Math.max(1, k);
-        ctx.strokeStyle = '#000';
-        ctx.stroke();
+      });
+      st.sunRaster.pixels.forEach(function (p) {
+        ctx.beginPath();
+        ctx.arc(p.x * sc, p.y * sc, mr, 0, 2 * Math.PI);
+        ctx.fillStyle = p.open ? '#ffd200' : '#eb2828';
+        ctx.fill();
       });
     }
   }
@@ -523,6 +531,7 @@
 
   function updateMetrics() {
     st.metrics = T.opennessByRing(st.mask, HEMI_SIZE);
+    st.factors = T.siteFactors(st.mask, HEMI_SIZE);
     var el = $('opennessSummary');
     el.hidden = false;
     el.textContent = 'Total openness: ' +
@@ -548,8 +557,14 @@
   // ---- 4 · Sun path -------------------------------------------------------------
   function selectedDate() {
     var now = new Date();
-    if (st.datePreset === 'mar15') return { y: now.getFullYear(), m: 3, d: 15 };
-    if (st.datePreset === 'dec1') return { y: now.getFullYear(), m: 12, d: 1 };
+    var presets = {
+      oct15: { m: 10, d: 15 }, dec1: { m: 12, d: 1 },
+      dec21: { m: 12, d: 21 }, mar15: { m: 3, d: 15 }
+    };
+    if (presets[st.datePreset]) {
+      return { y: now.getFullYear(),
+               m: presets[st.datePreset].m, d: presets[st.datePreset].d };
+    }
     if (st.datePreset === 'custom' && st.customDate) {
       var p = st.customDate.split('-');
       return { y: +p[0], m: +p[1], d: +p[2] };
@@ -562,25 +577,73 @@
     var lon = parseFloat($('lonInput').value);
     var summary = $('sunSummary');
     if (!isFinite(lat) || !isFinite(lon) || !st.mask) {
-      st.sun = null;
+      st.sun = null; st.sunRaster = null; st.energy = null;
       summary.hidden = true;
+      updateStats();
       return;
     }
     var tz = null;
     if ($('tzMode').value === 'manual') tz = parseFloat($('tzOffset').value) || 0;
     var d = selectedDate();
+
+    // per-minute time steps: hours of direct sun + clear-sky energy
     var path = S.solarPath(lat, lon, d.y, d.m, d.d, tz, SUN_STEP_MIN);
     st.sun = S.classifyPath(path, st.mask, HEMI_SIZE);
     st.sun.date = d; st.sun.lat = lat; st.sun.lon = lon; st.sun.tz = tz;
+    st.energy = S.clearSkyEnergy(path, st.mask, HEMI_SIZE,
+                                 st.factors ? st.factors.isf : 0, SUN_STEP_MIN);
 
-    var openH = st.sun.open * SUN_STEP_MIN / 60;
-    var totalH = (st.sun.open + st.sun.blocked) * SUN_STEP_MIN / 60;
+    // fine sampling + rasterization: every pixel the track crosses, once
+    var fine = S.solarPath(lat, lon, d.y, d.m, d.d, tz, 0.25);
+    st.sunRaster = S.classifyPixels(S.rasterizePath(fine, HEMI_SIZE),
+                                    st.mask, HEMI_SIZE);
+
     summary.hidden = false;
     summary.textContent =
       d.y + '-' + String(d.m).padStart(2, '0') + '-' + String(d.d).padStart(2, '0') +
-      ': sun above horizon ' + totalH.toFixed(1) + ' h — direct sun ≈ ' +
-      openH.toFixed(1) + ' h (' + st.sun.open + ' open / ' + st.sun.blocked +
-      ' blocked steps)';
+      ': sun above horizon ' + st.energy.aboveHorizonHours.toFixed(1) +
+      ' h — direct sun ≈ ' + st.energy.directSunHours.toFixed(1) + ' h — path ' +
+      (st.sunRaster.total ? (100 * st.sunRaster.open / st.sunRaster.total).toFixed(0) : 0) +
+      '% open';
+    updateStats();
+  }
+
+  function fmtPct(f, digits) { return (f * 100).toFixed(digits == null ? 1 : digits) + '%'; }
+
+  function updateStats() {
+    if (st.factors) {
+      $('statOpenness').textContent = fmtPct(st.factors.opennessSolidAngle);
+      $('statOpennessSub').textContent = 'solid-angle share of the sky dome (' +
+        fmtPct(st.metrics.totalOpenness) + ' of image pixels)';
+      $('statIsf').textContent = st.factors.isf.toFixed(3);
+    }
+    var dash = '—';
+    if (st.sunRaster && st.sunRaster.total) {
+      $('statPathOpen').textContent = fmtPct(st.sunRaster.open / st.sunRaster.total);
+      $('statPathOpenSub').textContent = st.sunRaster.open + ' of ' +
+        st.sunRaster.total + ' path pixels over open sky';
+    } else {
+      $('statPathOpen').textContent = dash;
+      $('statPathOpenSub').textContent = 'set a location in step 4';
+    }
+    if (st.energy) {
+      $('statDsf').textContent = st.energy.dsf.toFixed(3);
+      $('statGsf').textContent = st.energy.gsf.toFixed(3);
+      $('statSunHours').textContent = st.energy.directSunHours.toFixed(1) + ' h';
+      $('statSunHoursSub').textContent = 'of ' +
+        st.energy.aboveHorizonHours.toFixed(1) + ' h above the horizon';
+      $('statEnergy').innerHTML = (st.energy.siteWh / 1000).toFixed(2) +
+        ' <span class="unit">kWh/m²</span>';
+      $('statEnergySub').textContent = 'clear-sky est. — open ground would get ' +
+        (st.energy.skyWh / 1000).toFixed(2) + ' kWh/m² (' +
+        fmtPct(st.energy.gsf, 0) + ')';
+    } else {
+      ['statDsf', 'statGsf', 'statSunHours', 'statEnergy'].forEach(function (id) {
+        $(id).textContent = dash;
+      });
+      $('statSunHoursSub').textContent = 'set a location in step 4';
+      $('statEnergySub').textContent = 'set a location in step 4';
+    }
   }
 
   function sunChanged() { recomputeSun(); drawHemi(); }
@@ -712,14 +775,30 @@
       threshold: st.threshold,
       thresholdMode: st.userThreshold ? 'manual' : 'otsu',
       openness: st.metrics,
+      siteFactors: st.factors ? {
+        canopyOpennessSolidAngle: Math.round(st.factors.opennessSolidAngle * 10000) / 10000,
+        isf: Math.round(st.factors.isf * 10000) / 10000,
+        dsf: st.energy ? Math.round(st.energy.dsf * 10000) / 10000 : null,
+        gsf: st.energy ? Math.round(st.energy.gsf * 10000) / 10000 : null
+      } : null,
       sun: st.sun ? {
         lat: st.sun.lat, lon: st.sun.lon,
         utcOffsetHours: st.sun.tz == null ? 'device' : st.sun.tz,
         date: d.y + '-' + String(d.m).padStart(2, '0') + '-' + String(d.d).padStart(2, '0'),
         stepMinutes: SUN_STEP_MIN,
         openSteps: st.sun.open, blockedSteps: st.sun.blocked,
-        directSunHours: Math.round(st.sun.open * SUN_STEP_MIN / 60 * 100) / 100,
-        aboveHorizonHours: Math.round((st.sun.open + st.sun.blocked) * SUN_STEP_MIN / 60 * 100) / 100
+        directSunHours: Math.round(st.energy.directSunHours * 100) / 100,
+        aboveHorizonHours: Math.round(st.energy.aboveHorizonHours * 100) / 100,
+        pathPixels: st.sunRaster ? {
+          open: st.sunRaster.open, total: st.sunRaster.total,
+          openFraction: st.sunRaster.total
+            ? Math.round(st.sunRaster.open / st.sunRaster.total * 10000) / 10000 : 0
+        } : null,
+        clearSkyEnergy: {
+          model: 'Kasten-Young air mass; DNI = 1361 * 0.7^(AM^0.678) W/m2; DHI = 0.1 * DNI; horizontal surface',
+          siteWhPerM2: Math.round(st.energy.siteWh),
+          openSkyWhPerM2: Math.round(st.energy.skyWh)
+        }
       } : null
     };
     download(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }),

@@ -136,8 +136,42 @@
     };
   }
 
+  // Standard hemispherical-photography site factors from the sky mask.
+  //
+  // The image is an equidistant polar projection (zenith angle proportional
+  // to radius), so image-pixel fractions over-weight the horizon. Weighting
+  // each pixel by its solid angle (dOmega/dA ~ sin(theta)/r, finite at the
+  // center) gives the true fraction of the sky dome that is open; adding a
+  // cos(theta) incidence term gives the diffuse light reaching a horizontal
+  // surface under a uniform sky — the Indirect Site Factor (ISF).
+  // Both are ratios of open-sky sums to whole-dome sums, so the projection
+  // constants cancel.
+  function siteFactors(mask, size) {
+    var c = Math.floor(size / 2), radius = Math.floor(size / 2);
+    var halfPi = Math.PI / 2;
+    var skySA = 0, allSA = 0, skyISF = 0, allISF = 0;
+    for (var y = 0; y < size; y++) {
+      var dy = y - c, row = y * size;
+      for (var x = 0; x < size; x++) {
+        var dx = x - c;
+        var r = Math.sqrt(dx * dx + dy * dy);
+        if (r > radius) continue;
+        var theta = (r / radius) * halfPi;
+        var wSA = r > 1e-6 ? Math.sin(theta) / r : halfPi / radius;
+        var wISF = wSA * Math.cos(theta);
+        allSA += wSA; allISF += wISF;
+        if (mask[row + x] > 127) { skySA += wSA; skyISF += wISF; }
+      }
+    }
+    return {
+      opennessSolidAngle: allSA ? skySA / allSA : 0,
+      isf: allISF ? skyISF / allISF : 0
+    };
+  }
+
   var api = {
     thresholdSky: thresholdSky,
+    siteFactors: siteFactors,
     applyThreshold: applyThreshold,
     otsuThreshold: otsuThreshold,
     gaussianBlur5: gaussianBlur5,
