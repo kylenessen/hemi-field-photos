@@ -33,12 +33,17 @@
   <!-- 2 · Set north ------------------------------------------------------->
   <section class="card locked" id="step-north">
     <h2><span class="stepnum">2</span> Set north</h2>
-    <p class="hint">This is the ground, seen from above &mdash; you're at the
-    center. <strong>Tap two points</strong> (base of the north reference, then
-    its tip, e.g. arm &rarr; phone) or <strong>drag the ring handle</strong> to
-    point the arrow north.</p>
+    <p class="hint">This is the ground, seen from above &mdash; the camera is at
+    the center. <strong>Tap the north reference</strong> (e.g. the phone) and
+    the arrow will point from the center through your tap, or
+    <strong>drag the ring handle</strong>. Zoom in if the reference is small.</p>
     <div class="canvaswrap">
       <canvas id="groundCanvas"></canvas>
+    </div>
+    <div class="row slider-row">
+      <label for="groundZoom">Zoom</label>
+      <input type="range" id="groundZoom" min="1" max="4" step="0.05" value="2.5">
+      <span id="groundZoomValue" class="readout">2.5&times;</span>
     </div>
     <div class="row">
       <button id="northUndo" disabled>&#8630; Undo</button>
@@ -84,8 +89,10 @@
     </div>
     <div class="row wrap seg" role="group" aria-label="Date">
       <button class="segbtn datebtn active" data-preset="today">Today</button>
-      <button class="segbtn datebtn" data-preset="mar15">Mar 15</button>
+      <button class="segbtn datebtn" data-preset="oct15">Oct 15</button>
       <button class="segbtn datebtn" data-preset="dec1">Dec 1</button>
+      <button class="segbtn datebtn" data-preset="dec21">Dec 21 (solstice)</button>
+      <button class="segbtn datebtn" data-preset="mar15">Mar 15</button>
       <label class="datecustom">Custom <input type="date" id="dateInput"></label>
     </div>
     <div class="row wrap">
@@ -100,6 +107,52 @@
     <div id="sunSummary" class="info" hidden></div>
     <p class="legend"><span class="dot open"></span> open sky
        <span class="dot blocked"></span> blocked</p>
+  </section>
+
+  <!-- Results ------------------------------------------------------------->
+  <section class="card locked" id="step-stats">
+    <h2>Results</h2>
+    <div class="stats">
+      <div class="tile">
+        <div class="label">Canopy openness</div>
+        <div class="value" id="statOpenness">&mdash;</div>
+        <div class="sub" id="statOpennessSub">solid-angle share of the sky dome</div>
+      </div>
+      <div class="tile">
+        <div class="label">ISF &middot; indirect site factor</div>
+        <div class="value" id="statIsf">&mdash;</div>
+        <div class="sub">diffuse light vs. open ground (uniform sky)</div>
+      </div>
+      <div class="tile">
+        <div class="label">DSF &middot; direct site factor</div>
+        <div class="value" id="statDsf">&mdash;</div>
+        <div class="sub">direct beam vs. open ground, selected day</div>
+      </div>
+      <div class="tile">
+        <div class="label">GSF &middot; global site factor</div>
+        <div class="value" id="statGsf">&mdash;</div>
+        <div class="sub">direct + diffuse vs. open ground, selected day</div>
+      </div>
+      <div class="tile">
+        <div class="label">Sun path open</div>
+        <div class="value" id="statPathOpen">&mdash;</div>
+        <div class="sub" id="statPathOpenSub">share of path pixels over open sky</div>
+      </div>
+      <div class="tile">
+        <div class="label">Direct sun</div>
+        <div class="value" id="statSunHours">&mdash;</div>
+        <div class="sub" id="statSunHoursSub">hours of direct beam, selected day</div>
+      </div>
+      <div class="tile">
+        <div class="label">Solar energy at this spot</div>
+        <div class="value" id="statEnergy">&mdash;</div>
+        <div class="sub" id="statEnergySub">clear-sky estimate, horizontal surface</div>
+      </div>
+    </div>
+    <p class="hint">Site factors follow the hemispherical-photography
+    convention (0 = fully obstructed, 1 = open ground). Energy uses a simple
+    clear-sky model (Kasten&ndash;Young air mass, DNI = 1361&thinsp;&times;&thinsp;0.7<sup>AM<sup>0.678</sup></sup>,
+    diffuse = 10% of DNI) &mdash; an estimate, not a calibrated measurement.</p>
   </section>
 
   <!-- 5 · Export ---------------------------------------------------------->

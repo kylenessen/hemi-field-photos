@@ -160,6 +160,24 @@ input[type="number"] { width: 110px; }
 
 details summary { cursor: pointer; color: var(--muted); margin-top: 10px; }
 
+/* Stat tiles */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.tile {
+  background: #161b20;
+  border: 1px solid #232b33;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.tile .label { color: var(--muted); font-size: 0.78rem; }
+.tile .value { font-size: 1.55rem; font-weight: 650; margin: 2px 0; }
+.tile .value .unit { font-size: 0.95rem; font-weight: 500; color: var(--muted); }
+.tile .sub { color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
+
 @media (max-width: 480px) {
   body { padding: 0 8px 24px; }
   .card { padding: 12px; }

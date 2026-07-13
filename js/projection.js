@@ -88,10 +88,14 @@
   // Project the BOTTOM half (rows H/2..H-1, zenith 90..180) to a looking-down
   // polar view: center = nadir, edge = horizon. Same compass handedness as
   // the sky view. Used for the "set north" step.
-  function equirectToGroundView(bottomHalf, size, northAzimuthDeg) {
+  // `zoom` >= 1 magnifies the center: at zoom z the canvas edge shows the
+  // zenith angle 180 - 90/z instead of the horizon (angles stay unchanged,
+  // so tap/drag azimuth math is zoom-invariant).
+  function equirectToGroundView(bottomHalf, size, northAzimuthDeg, zoom) {
+    var z = zoom > 1 ? zoom : 1;
     var maxRow = bottomHalf.height - 1;
     return polarRemap(bottomHalf, bottomHalf.width, size, northAzimuthDeg, function (rf) {
-      var v = (1 - rf) * maxRow;         // center = last row (nadir)
+      var v = (1 - rf / z) * maxRow;     // center = last row (nadir)
       return v < 0 ? 0 : v;
     });
   }

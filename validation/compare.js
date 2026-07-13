@@ -97,5 +97,19 @@ const refOpen = meta.sun.filter(s => s.open).length;
 console.log(`sun classification (js open=${cls.open}/${cls.open + cls.blocked}, py open=${refOpen}/${meta.sun.length}):`);
 check('open-step count diff', Math.abs(cls.open - refOpen), 8);
 
+// ---- rasterized path: every crossed pixel exactly once, no gaps ---------------
+const fine = S.solarPath(meta.lat, meta.lon, y, mo, d, meta.tz, 0.25);
+const raster = S.rasterizePath(fine, SIZE);
+const keys = new Set(raster.map(p => p.y * SIZE + p.x));
+let gaps = 0;
+for (let i = 1; i < raster.length; i++) {
+  if (Math.abs(raster[i].x - raster[i - 1].x) > 1 ||
+      Math.abs(raster[i].y - raster[i - 1].y) > 1) gaps++;
+}
+const rcls = S.classifyPixels(raster, res.mask, SIZE);
+console.log(`raster path (${raster.length} px, ${(100 * rcls.open / rcls.total).toFixed(1)}% open):`);
+check('duplicate path pixels', raster.length - keys.size, 0);
+check('non-adjacent consecutive pixels', gaps, 0);
+
 console.log(failures ? `\n${failures} check(s) FAILED` : '\nall checks passed');
 process.exit(failures ? 1 : 0);

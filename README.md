@@ -30,18 +30,30 @@ location and date. Runs entirely client-side; photos never leave the device.
 1. **Upload** an equirectangular 360° photo (2:1 aspect). Large photos are
    downscaled to a working copy for interaction; exports re-render from a
    higher-resolution copy.
-2. **Set north** on the looking-down ground view: tap two points (base of the
-   north reference → its tip) or drag the ring handle. Undo/redo supported;
-   a live arrow and compass labels confirm the direction.
+2. **Set north** on the looking-down ground view: tap the north reference
+   once (the arrow points from the center through your tap — the azimuth of a
+   point in a polar view depends only on its angle around the center) or drag
+   the ring handle. A zoom slider magnifies the center so a small reference
+   (an operator holding a phone) is easy to hit. Undo/redo supported; a live
+   arrow and compass labels confirm the direction.
 3. **Hemisphere & threshold**: the north-up hemisphere renders automatically.
    The sky mask defaults to Otsu on the blue channel; adjust with the slider
    (live preview), toggle true color vs. mask, and read total / per-ring
    openness.
 4. **Sun path**: enter lat/lon (or "use my location") and pick a date —
-   Today, Mar 15, Dec 1, or custom. Each 2-minute sun step is drawn yellow
-   (open sky) or red (blocked). Time zone defaults to the device's (incl.
-   DST); a manual UTC offset is available for analyzing far-away locations.
-5. **Export** the hemisphere, sky mask, and annotated sun-path PNGs
+   Today, Oct 15, Dec 1, Dec 21 (solstice), Mar 15, or custom. The day's
+   track is rasterized to the exact set of pixels it crosses (each counted
+   once — Bresenham between fine 15-second samples) and drawn yellow (open
+   sky) or red (blocked). Time zone defaults to the device's (incl. DST);
+   a manual UTC offset is available for analyzing far-away locations.
+5. **Results**: standard hemispherical-photography measures — solid-angle
+   canopy openness, ISF (indirect site factor, uniform sky + cosine
+   incidence), DSF and GSF for the selected day — plus the percentage of
+   sun-path pixels over open sky, hours of direct sun, and an estimated
+   clear-sky solar energy total for the day (Kasten–Young air mass,
+   DNI = 1361·0.7^(AM^0.678) W/m², diffuse = 10% of DNI, horizontal surface;
+   an estimate, not a calibrated measurement).
+6. **Export** the hemisphere, sky mask, and annotated sun-path PNGs
    (2048×2048, rendered from up to an 8192-wide copy of the original) plus a
    metrics JSON (north azimuth, threshold, openness, sun-step counts).
 
